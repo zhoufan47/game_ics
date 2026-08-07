@@ -1,0 +1,62 @@
+name: Update Game Releases Calendar
+
+on:
+  schedule:
+    # 每月 7 日 UTC 00:00 触发一次。
+    # 格式：分 时 日 月 星期；'0 0 7 * *' = 每月 7 日 0 时 0 分（UTC）
+    - cron: "0 0 7 * *"
+  # 允许在 Actions 页面手动触发，便于调试或首次填充历史数据
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 防止同一定时任务并发执行造成 git 推送冲突
+concurrency:
+  group: update-games-calendar
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: 拉取 RAWG 数据并生成 ICS
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 生成 ICS 日历
+        env:
+          RAWG_API_KEY: ${{ secrets.RAWG_API_KEY }}
+          DATA_DIR: data
+          # python -m src.main 会把 src 当作 package 来导入
+          PYTHONPATH: src
+        run: |
+          python -m src.main
+
+      - name: 提交并推送 ICS 数据
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "本次运行没有 ICS 数据更新，无需提交。"
+            exit 0
+          fi
+          today=$(date -u +'%Y-%m-%d')
+          git commit -m "chore(calendar): 更新游戏发售日历 (${today})"
+          git push
